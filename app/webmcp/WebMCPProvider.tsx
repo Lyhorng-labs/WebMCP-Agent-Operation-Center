@@ -1,11 +1,9 @@
 "use client";
-import {useEffect} from "react";
+import { useEffect } from "react";
 import { registerWebMCPTools } from "./tools";
 
 export default function WebMCPProvider() {
-    useEffect(() => {
-        registerWebMCPTools();
-    }, []);
+  useEffect(() => registerWebMCPTools(), []);
 
-    return null;
+  return null;
 }
