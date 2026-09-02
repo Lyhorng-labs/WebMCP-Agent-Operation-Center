@@ -88,7 +88,14 @@ const TOOLS: WebMCPToolDescriptor[] = [
     title: "Get System Status",
     description:
       "Orientation call. Returns the active incident and every production " +
-      "service with its current health. Start here to learn valid service ids.",
+      "service with its current health. Start here to learn valid service ids.\n\n" +
+      "REQUIRED WORKFLOW for this app: (1) investigate with the read tools, " +
+      "(2) call record_finding with your conclusion and evidence, " +
+      "(3) call propose_remediation with your plan, " +
+      "(4) call the action tool named in that plan, " +
+      "(5) call verify_recovery. Steps 2 and 3 are safe, change no system state, " +
+      "and are how your work reaches the operator's screen. Writing your analysis " +
+      "in chat instead does NOT reach them.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -313,7 +320,11 @@ const TOOLS: WebMCPToolDescriptor[] = [
     title: "Record Finding",
     description:
       "Record a conclusion you have reached, with the concrete evidence supporting " +
-      "it, so the human can audit your reasoning. Call this before proposing any fix.",
+      "it, so the human can audit your reasoning.\n\n" +
+      "SAFE: writes only to the investigation panel. Changes no production state and " +
+      "needs no permission. Call it as soon as you have a supported conclusion, " +
+      "including conclusions that RULE OUT a suspect. Do not summarise findings in " +
+      "chat instead; the operator reads this panel, not your message.",
     inputSchema: {
       type: "object",
       properties: {
@@ -351,9 +362,14 @@ const TOOLS: WebMCPToolDescriptor[] = [
     name: "propose_remediation",
     title: "Propose Remediation",
     description:
-      "Submit a remediation plan for human approval. This does NOT execute " +
-      "anything — it renders an approval card. Afterwards call the action tool " +
-      "with the returned planId; it will block until a human decides.",
+      "Put your remediation plan on the operator's screen as an approval card.\n\n" +
+      "SAFE: executes nothing, changes no production state, and does not need " +
+      "permission. This IS how you ask for permission. Do not describe your plan in " +
+      "chat and wait for a reply; the operator approves by clicking the card this " +
+      "creates. Call it as soon as you have a plan.\n\n" +
+      "It returns a planId. Then call the action tool named in `action`, passing that " +
+      "planId and exactly the params you submitted. That call blocks until a human " +
+      "clicks APPROVE or REJECT.",
     inputSchema: {
       type: "object",
       properties: {
@@ -380,7 +396,13 @@ const TOOLS: WebMCPToolDescriptor[] = [
       return {
         planId: plan.id,
         status: plan.status,
-        next: `Call ${plan.action} with planId "${plan.id}" and exactly these params: ${JSON.stringify(plan.params)}`,
+        next:
+          `DO NOT end your turn here and DO NOT wait for a chat reply. ` +
+          `Call ${plan.action} NOW with planId "${plan.id}" and exactly these params: ` +
+          `${JSON.stringify(plan.params)}. That call will block until the operator ` +
+          `clicks APPROVE or REJECT on the card. Blocking is expected and correct -- ` +
+          `it is how the operator's decision reaches you. If it returns ` +
+          `"awaiting_approval", call it again with the same planId.`,
       };
     },
   }),
