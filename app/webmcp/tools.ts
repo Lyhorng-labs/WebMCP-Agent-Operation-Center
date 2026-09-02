@@ -362,14 +362,18 @@ const TOOLS: WebMCPToolDescriptor[] = [
     name: "propose_remediation",
     title: "Propose Remediation",
     description:
-      "Put your remediation plan on the operator's screen as an approval card.\n\n" +
-      "SAFE: executes nothing, changes no production state, and does not need " +
-      "permission. This IS how you ask for permission. Do not describe your plan in " +
-      "chat and wait for a reply; the operator approves by clicking the card this " +
-      "creates. Call it as soon as you have a plan.\n\n" +
-      "It returns a planId. Then call the action tool named in `action`, passing that " +
-      "planId and exactly the params you submitted. That call blocks until a human " +
-      "clicks APPROVE or REJECT.",
+      "Put your remediation plan on the operator's screen as an approval card, and " +
+      "WAIT here for their decision.\n\n" +
+      "SAFE: this executes nothing and changes no production state. It IS how you ask " +
+      "for permission, so it needs no permission of its own. Call it as soon as you " +
+      "have a plan.\n\n" +
+      "THIS CALL BLOCKS until the operator clicks APPROVE or REJECT in the UI. That is " +
+      "expected and correct: blocking is how their decision reaches you. Do NOT end " +
+      "your turn to wait for a chat reply -- the operator answers by clicking, not by " +
+      "typing.\n\n" +
+      "When it returns approved, immediately call the action tool named in `action` " +
+      "with the returned planId and the same params. Follow the `next` field it gives " +
+      "you.",
     inputSchema: {
       type: "object",
       properties: {
@@ -391,18 +395,42 @@ const TOOLS: WebMCPToolDescriptor[] = [
       additionalProperties: false,
     },
     note: (a) => `Proposed ${a.action} — awaiting approval`,
-    run: (input) => {
+    run: async (input) => {
       const plan = createPlan(input);
+
+      // Block HERE rather than in the action tool. The agent reliably calls this
+      // one -- it is the only way to ask for permission -- whereas it tends to
+      // avoid calling a tool it believes it lacks permission for, which left the
+      // approval card with nothing waiting on it.
+      const decision = await awaitDecision(plan.id, 45_000);
+
+      const actionCall =
+        `${plan.action} with planId "${plan.id}" and exactly these params: ` +
+        `${JSON.stringify(plan.params)}`;
+
+      if (decision === "approved") {
+        return {
+          planId: plan.id,
+          status: "approved",
+          next: `The operator APPROVED this plan. Call ${actionCall} now -- it will return immediately.`,
+        };
+      }
+
+      if (decision === "rejected") {
+        return {
+          planId: plan.id,
+          status: "rejected",
+          reason: getPlan(plan.id)?.rejectionReason ?? null,
+          next: "Do not execute anything. Report the rejection to the operator and stop.",
+        };
+      }
+
       return {
         planId: plan.id,
-        status: plan.status,
+        status: "awaiting_approval",
         next:
-          `DO NOT end your turn here and DO NOT wait for a chat reply. ` +
-          `Call ${plan.action} NOW with planId "${plan.id}" and exactly these params: ` +
-          `${JSON.stringify(plan.params)}. That call will block until the operator ` +
-          `clicks APPROVE or REJECT on the card. Blocking is expected and correct -- ` +
-          `it is how the operator's decision reaches you. If it returns ` +
-          `"awaiting_approval", call it again with the same planId.`,
+          `The operator has not decided yet. Do NOT end your turn. Call ${actionCall} ` +
+          `now -- that call will keep waiting for their decision.`,
       };
     },
   }),
