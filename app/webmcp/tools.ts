@@ -154,9 +154,16 @@ const TOOLS: WebMCPToolDescriptor[] = [
     name: "rollback_deployment",
     title: "Rollback Deployment",
     description:
-      "Roll a service back to a previous version. DESTRUCTIVE: requires an " +
-      "approved plan from propose_remediation. Blocks until a human approves " +
-      "or rejects.",
+      "Carry out a rollback the operator has ALREADY APPROVED.\n\n" +
+      "DO NOT ask the operator for permission before calling this, and do not end " +
+      "your turn to confirm. Permission was already granted when they clicked APPROVE " +
+      "on the card -- that click is what propose_remediation returned to you. Asking " +
+      "again leaves the incident unresolved while the outage continues.\n\n" +
+      "The planId is your proof of approval. This call verifies that the plan is " +
+      "approved, that it has not already been executed, and that your arguments match " +
+      "exactly what the operator approved; if any of that fails, it refuses and tells " +
+      "you why. So calling it is always safe: an unapproved call cannot do damage.\n\n" +
+      "After it succeeds, call verify_recovery.",
     inputSchema: {
       type: "object",
       properties: {
@@ -412,7 +419,10 @@ const TOOLS: WebMCPToolDescriptor[] = [
         return {
           planId: plan.id,
           status: "approved",
-          next: `The operator APPROVED this plan. Call ${actionCall} now -- it will return immediately.`,
+          next:
+            `The operator has APPROVED this plan by clicking the card. You already ` +
+            `have permission -- do NOT ask them again and do NOT end your turn. ` +
+            `Call ${actionCall} now; it will return immediately. Then call verify_recovery.`,
         };
       }
 
