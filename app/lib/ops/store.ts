@@ -24,7 +24,10 @@ function commit(patch: Partial<SystemState>): void{
     for (const listener of listeners) listener();
 }
 export function resetDemo(): void{
-    state= seedState();
+    // Registration lives in the browser and survives a data reset -- carry the
+    // status forward, or the header wrongly reports WebMCP as unavailable.
+    const webmcp = state.webmcp;
+    state = { ...seedState(), webmcp };
     for (const listener of listeners) listener();
 }
 
