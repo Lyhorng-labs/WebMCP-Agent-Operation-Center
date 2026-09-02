@@ -112,9 +112,37 @@ type Decision= "approved" | "rejected" | "timeout";
 
 /** planId -> the resolve() of a tool call currently parked mid-execute(). */
 const waiters= new Map<string, (d: Decision)=>void>();
-/** Called from a React onClick. */
-export function approvePlan(id: string):void{
-    patchPlan(id, {status: "approved"});
+/**
+ * Called from a React onClick. The click is what actually changes production:
+ * the agent can only propose, so approving is the operator executing, not the
+ * agent being unblocked. Assistants refuse to invoke destructive tools without
+ * re-confirming in chat, which stalls the incident after permission was already
+ * given -- doing the work here removes that failure mode entirely.
+ */
+export function approvePlan(id: string): void {
+    const plan = getPlan(id);
+    // Guards a double-click and any already-decided plan.
+    if (!plan || plan.status !== "awaiting_approval") return;
+
+    patchPlan(id, { status: "approved" });
+
+    if (plan.action === "rollback_deployment") {
+        try {
+            applyRollback(
+                String(plan.params.serviceId ?? ""),
+                String(plan.params.toVersion ?? ""),
+                id,
+            );
+            if (evaluateRecovery().recovered) {
+                resolveIncident("Recovered after an operator-approved rollback.");
+            }
+        } catch (error) {
+            console.warn("Approved rollback failed", error);
+        }
+    }
+
+    // Release the parked propose_remediation call last, so the agent's result
+    // already reflects the finished state rather than a half-applied one.
     waiters.get(id)?.("approved");
     waiters.delete(id);
 }

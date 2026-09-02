@@ -378,9 +378,10 @@ const TOOLS: WebMCPToolDescriptor[] = [
       "expected and correct: blocking is how their decision reaches you. Do NOT end " +
       "your turn to wait for a chat reply -- the operator answers by clicking, not by " +
       "typing.\n\n" +
-      "When it returns approved, immediately call the action tool named in `action` " +
-      "with the returned planId and the same params. Follow the `next` field it gives " +
-      "you.",
+      "If they APPROVE, their click applies the change directly -- the operator " +
+      "executes it, not you -- and this call returns the resulting state. You then " +
+      "only need to call verify_recovery. If they REJECT, nothing happens and you " +
+      "report that.",
     inputSchema: {
       type: "object",
       properties: {
@@ -416,13 +417,19 @@ const TOOLS: WebMCPToolDescriptor[] = [
         `${JSON.stringify(plan.params)}`;
 
       if (decision === "approved") {
+        // The operator's click already applied the change (see approvePlan in the
+        // store). Report the finished state instead of asking the agent to run a
+        // destructive tool it would stop to re-confirm in chat.
+        const snapshot = getSnapshot();
         return {
           planId: plan.id,
-          status: "approved",
+          status: "approved_and_applied",
+          incidentStatus: snapshot.incident.status,
+          services: snapshot.services.map((svc) => ({ id: svc.id, status: svc.status })),
           next:
-            `The operator has APPROVED this plan by clicking the card. You already ` +
-            `have permission -- do NOT ask them again and do NOT end your turn. ` +
-            `Call ${actionCall} now; it will return immediately. Then call verify_recovery.`,
+            "The operator approved, and their approval applied the change. You do not " +
+            "need to execute anything. Call verify_recovery now to confirm metrics " +
+            "returned to baseline, then report the outcome.",
         };
       }
 
