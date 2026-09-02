@@ -1,26 +1,51 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  color-scheme: dark;
+  --ops-bg: #07090d;
+  --ops-panel: #0b0f16;
+  --ops-line: #1a2130;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Faint horizon glow + hairline grid: reads as an ops room without costing legibility. */
+  background:
+    radial-gradient(ellipse 70% 45% at 50% -8%, rgba(56, 189, 248, 0.08), transparent 62%),
+    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px) 0 0 / 100% 28px,
+    var(--ops-bg);
+  color: #d4d4d8;
 }
+
+/* Live status dot on an active incident. */
+@keyframes ops-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.3; transform: scale(0.78); }
+}
+.ops-pulse { animation: ops-pulse 1.6s ease-in-out infinite; }
+
+/* An approval card that is actively blocking a tool call. */
+@keyframes ops-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(245,158,11,0.45), 0 0 18px -6px rgba(245,158,11,0.55); }
+  50%      { box-shadow: 0 0 0 1px rgba(245,158,11,0.85), 0 0 30px -4px rgba(245,158,11,0.9); }
+}
+.ops-glow { animation: ops-glow 1.9s ease-in-out infinite; }
+
+@keyframes ops-spin { to { transform: rotate(360deg); } }
+.ops-spin { animation: ops-spin 0.9s linear infinite; }
+
+/* Sweep across a panel header while the agent is mid-call. */
+@keyframes ops-scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.ops-scan { animation: ops-scan 1.8s ease-in-out infinite; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #1e2633; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2a3444; }
+::-webkit-scrollbar-track { background: transparent; }

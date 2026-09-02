@@ -1,7 +1,3 @@
-/**
- * Ambient types for the WebMCP browser API (`document.modelContext`).
- * Not part of lib.dom.d.ts, so we declare the surface we use here.
- */
 
 interface WebMCPJSONSchema {
   type: string;
@@ -19,25 +15,20 @@ interface WebMCPToolDescriptor {
   execute: (args: Record<string, unknown>) => unknown | Promise<unknown>;
 }
 
-/**
- * What `registerTool` hands back. Implementations differ: some return a
- * registration object, some a bare unregister function, some nothing at all
- * (and expose `unregisterTool` instead), so all three are modelled.
- */
-interface WebMCPToolRegistration {
-  unregister(): void | Promise<void>;
+interface WebMCPRegisteredTool {
+  name: string;
+  description?: string;
+  [key: string]: unknown;
 }
-
-type WebMCPRegisterResult =
-  | WebMCPToolRegistration
-  | (() => void | Promise<void>)
-  | void;
 
 interface WebMCPModelContext {
   registerTool(
     tool: WebMCPToolDescriptor,
-  ): WebMCPRegisterResult | Promise<WebMCPRegisterResult>;
-  unregisterTool?(name: string): void | Promise<void>;
+  ): WebMCPRegisteredTool | void | Promise<WebMCPRegisteredTool | void>;
+  /** The browser's own view of what is registered. */
+  getTools(): WebMCPRegisteredTool[] | Promise<WebMCPRegisteredTool[]>;
+  executeTool(tool: WebMCPRegisteredTool, args: string): string | Promise<string>;
+  ontoolchange: ((this: WebMCPModelContext, ev: Event) => unknown) | null;
 }
 
 interface Document {

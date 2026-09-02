@@ -14,77 +14,28 @@ import {
   createPlan,
   evaluateRecovery,
   resolveIncident,
+  setWebMCPStatus,
 } from "../lib/ops/store";
 import type { PlanAction } from "../lib/ops/types";
-type Unregister = () => void | Promise<void>;
 
-/**
- * Unregister callbacks for tools this module has live, keyed by tool name.
- * Module-level so a StrictMode remount (or a Fast Refresh of a module that
- * imports this one) can tear down the previous registration instead of
- * colliding with it.
- */
-const activeTools = new Map<string, Unregister>();
+const REGISTERED_FLAG = "__aocWebMCPRegistered";
 
-/**
- * One promise chain per tool name. `registerTool` is async, so without this
- * StrictMode's mount -> cleanup -> mount can start the second registration
- * before the first has resolved and been released.
- */
-const queues = new Map<string, Promise<unknown>>();
-
-function queue<T>(name: string, step: () => Promise<T>): Promise<T> {
-  const next = (queues.get(name) ?? Promise.resolve()).then(step, step);
-  // Keep the chain alive after a failed step; callers handle their own errors.
-  queues.set(
-    name,
-    next.catch(() => {}),
-  );
-  return next;
-}
-
-/** Normalize the several shapes `registerTool` can return into one callback. */
-function toUnregister(
-  modelContext: WebMCPModelContext,
-  name: string,
-  result: WebMCPRegisterResult,
-): Unregister {
-  if (typeof result === "function") {
-    return result;
+/** Ask the browser what is actually registered, rather than trusting our own bookkeeping. */
+async function registeredNames(modelContext: WebMCPModelContext): Promise<string[]> {
+  try {
+    const tools = await modelContext.getTools();
+    if (!Array.isArray(tools)) return [];
+    return tools
+      .map((t) => t?.name)
+      .filter((n): n is string => typeof n === "string");
+  } catch {
+    return [];
   }
-  if (result && typeof result.unregister === "function") {
-    return () => result.unregister();
-  }
-  return () => modelContext.unregisterTool?.(name);
-}
-
-async function releaseTool(modelContext: WebMCPModelContext, name: string) {
-  const unregister = activeTools.get(name);
-  activeTools.delete(name);
-  if (unregister) {
-    await unregister();
-    return;
-  }
-  // No handle of our own — this module instance was replaced by Fast Refresh
-  // while its tool stayed registered. Fall back to removal by name.
-  await modelContext.unregisterTool?.(name);
-}
-
-async function claimTool(
-  modelContext: WebMCPModelContext,
-  descriptor: WebMCPToolDescriptor,
-) {
-  await releaseTool(modelContext, descriptor.name);
-  const result = await modelContext.registerTool(descriptor);
-  activeTools.set(
-    descriptor.name,
-    toUnregister(modelContext, descriptor.name, result),
-  );
 }
 
 /**
  * Normalize the tool result shape in ONE place. MCP wants content blocks; some
- * polyfills accept a bare string. Verify against the hackathon starter — if it
+ * polyfills accept a bare string. Verify against the hackathon starter -- if it
  * differs, this function is the only edit.
  */
 function text(value: unknown) {
@@ -215,7 +166,7 @@ const TOOLS: WebMCPToolDescriptor[] = [
       required: ["planId", "serviceId", "toVersion"],
       additionalProperties: false,
     },
-    note: (a) => `Rolled back ${a.serviceId} to ${a.toVersion}`,
+    note: (a) => `Rollback ${a.serviceId} → ${a.toVersion}`,
     run: async ({ planId, serviceId, toVersion }) => {
       const plan = getPlan(planId);
       if (!plan) {
@@ -224,12 +175,27 @@ const TOOLS: WebMCPToolDescriptor[] = [
       if (plan.status === "used") {
         return { error: "Already executed. One approval buys one execution." };
       }
+      
+      const decision = await awaitDecision(planId, 45_000);
 
-      const decision = await awaitDecision(planId); // <- parks on the human
-      if (decision !== "approved") {
+      if (decision === "timeout") {
         return {
-          error: `Not approved (${decision}).`,
-          reason: plan.rejectionReason ?? null,
+          status: "awaiting_approval",
+          planId,
+          message:
+            "Still waiting for human approval. Ask the operator to click APPROVE in the " +
+            "Remediation Plan panel, then call rollback_deployment again with the same " +
+            "planId and identical params.",
+        };
+      }
+
+      // Re-read: patchPlan replaced the object, so the `plan` captured above
+      // is a stale snapshot without the rejection reason.
+      const decided = getPlan(planId);
+      if (decision === "rejected") {
+        return {
+          error: "Plan rejected by the operator.",
+          reason: decided?.rejectionReason ?? null,
         };
       }
 
@@ -449,38 +415,85 @@ const TOOLS: WebMCPToolDescriptor[] = [
   }),
 ];
 export const TOOL_NAMES= TOOLS.map((t)=> t.name);
-/**
- * Registers this page's WebMCP tools and returns a cleanup function.
- */
+
 export function registerWebMCPTools(): () => void {
+  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+    (window as unknown as Record<string, unknown>).__ops = {
+      list: () => TOOL_NAMES,
+      /** Calls our local implementation. */
+      call: async (name: string, args: Record<string, unknown> = {}) => {
+        const tool = TOOLS.find((t) => t.name === name);
+        if (!tool) throw new Error(`No tool "${name}". Try: ${TOOL_NAMES.join(", ")}`);
+        return tool.execute(args);
+      },
+      /** Calls through the BROWSER's registry -- the path a real agent takes. */
+      callViaBrowser: async (name: string, args: Record<string, unknown> = {}) => {
+        const modelContext = document.modelContext;
+        if (!modelContext) throw new Error("document.modelContext unavailable");
+        // executeTool wants the browser's RegisteredTool handle, not a name.
+        const registered = await modelContext.getTools();
+        const handle = registered.find((t) => t?.name === name);
+        if (!handle) {
+          throw new Error(
+            `"${name}" is not registered. Registered: ${registered.map((t) => t?.name).join(", ")}`,
+          );
+        }
+        // executeTool takes and returns JSON strings, not objects.
+        const raw = await modelContext.executeTool(handle, JSON.stringify(args));
+        try {
+          return typeof raw === "string" ? JSON.parse(raw) : raw;
+        } catch {
+          return raw;
+        }
+      },
+      /** Inspect a RegisteredTool handle, for when the API shape is unclear. */
+      inspect: async (name: string) => {
+        const modelContext = document.modelContext;
+        if (!modelContext) throw new Error("document.modelContext unavailable");
+        const handle = (await modelContext.getTools()).find((t) => t?.name === name);
+        return {
+          handle,
+          own: handle ? Object.getOwnPropertyNames(handle) : [],
+          proto: handle
+            ? Object.getOwnPropertyNames(Object.getPrototypeOf(handle))
+            : [],
+        };
+      },
+      registered: async () =>
+        document.modelContext ? registeredNames(document.modelContext) : [],
+    };
+  }
+
   if (typeof document === "undefined" || !document.modelContext) {
+    setWebMCPStatus(false, []);
     return () => {};
   }
 
   const modelContext = document.modelContext;
+  const globals = window as unknown as Record<string, unknown>;
 
-  for (const tool of TOOLS) {
-    queue(tool.name, () => claimTool(modelContext, tool)).catch(
-      (error: unknown) => {
-        console.warn(`WebMCP: failed to register "${tool.name}"`, error);
-      },
-    );
-  }
-
-  let released = false;
-
-  return () => {
-    if (released) {
-      return;
-    }
-    released = true;
-
-    for (const tool of TOOLS) {
-      queue(tool.name, () => releaseTool(modelContext, tool.name)).catch(
-        (error: unknown) => {
-          console.warn(`WebMCP: failed to unregister "${tool.name}"`, error);
-        },
-      );
-    }
+  const sync = () => {
+    void registeredNames(modelContext).then((names) => setWebMCPStatus(true, names));
   };
+
+  // Already registered by an earlier mount of this module. Re-read the browser's
+  // registry so the header reflects reality rather than assuming.
+  if (globals[REGISTERED_FLAG]) {
+    sync();
+    return () => {};
+  }
+  globals[REGISTERED_FLAG] = true;
+
+  void (async () => {
+    for (const tool of TOOLS) {
+      try {
+        await modelContext.registerTool(tool);
+      } catch (error) {
+        console.warn(`WebMCP: failed to register "${tool.name}"`, error);
+      }
+    }
+    sync();
+  })();
+
+  return () => {};
 }

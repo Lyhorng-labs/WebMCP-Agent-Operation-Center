@@ -115,5 +115,6 @@ export function seedState(): SystemState{
         plans: [],
         focusedServiceId: null,
         logFilter: null,
+        webmcp: {available: false, registered: []},
     };
 }

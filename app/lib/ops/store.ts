@@ -4,6 +4,9 @@ import type { Plan, PlanAction, ToolCall } from "./types";
 
 let   state: SystemState = seedState();
 const listeners = new Set<() => void>();
+export function setWebMCPStatus(available: boolean, registered: string[]): void {
+  commit({ webmcp: { available, registered } });
+}
 /** Subscribe/getSnapshot pair consumed by useSyncExternalStore. */
 export function subscribe(listener: ()=> void): ()=> void {
     listeners.add(listener);

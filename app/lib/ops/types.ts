@@ -84,6 +84,7 @@ export interface SystemState {
   /** Set by read tools so the human watches the agent look around. */
   focusedServiceId: string | null;
   logFilter: LogFilter | null;
+  webmcp: {available: boolean; registered: string[]};
 }
 export interface ToolCall{
     id: string;
