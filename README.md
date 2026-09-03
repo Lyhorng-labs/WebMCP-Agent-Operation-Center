@@ -8,6 +8,7 @@ to read live system state, gather evidence, form a diagnosis, propose a fix — 
 **blocks mid-tool-call until a human approves it**.
 
 **Live demo:** https://web-mcp-agent-operation-center.vercel.app
+
 **Requires:** ChatGPT desktop in-app browser, or Chrome 149+ with
 `chrome://flags/#enable-webmcp-testing` enabled.
 
