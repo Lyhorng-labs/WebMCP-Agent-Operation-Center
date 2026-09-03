@@ -406,10 +406,6 @@ const TOOLS: WebMCPToolDescriptor[] = [
     run: async (input) => {
       const plan = createPlan(input);
 
-      // Block HERE rather than in the action tool. The agent reliably calls this
-      // one -- it is the only way to ask for permission -- whereas it tends to
-      // avoid calling a tool it believes it lacks permission for, which left the
-      // approval card with nothing waiting on it.
       const decision = await awaitDecision(plan.id, 45_000);
 
       const actionCall =
